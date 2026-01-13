@@ -181,18 +181,17 @@ function expandSelectionSet(
     inType: GQLType,
     optional: boolean,
 ): Selection[] {
-    return [...selectionSet.selections]
-        .reverse()
-        .map((s) => ({
-            selection: s,
-            inType,
-            optional: optional || hasOptionalDirectives(s.directives),
-        }));
+    return [...selectionSet.selections].reverse().map((s) => ({
+        selection: s,
+        inType,
+        optional: optional || hasOptionalDirectives(s.directives),
+    }));
 }
 
 interface GQLSchema {
     readonly mutationType?: GQLType;
     readonly queryType: GQLType;
+    readonly subscriptionType?: GQLType;
     readonly types: { [name: string]: GQLType };
 }
 
@@ -211,7 +210,11 @@ class GQLQuery {
         const queries: OperationDefinitionNode[] = [];
         for (const def of queryDocument.definitions) {
             if (def.kind === "OperationDefinition") {
-                if (def.operation === "query" || def.operation === "mutation") {
+                if (
+                    def.operation === "query" ||
+                    def.operation === "mutation" ||
+                    def.operation === "subscription"
+                ) {
                     queries.push(def);
                 }
             } else if (def.kind === "FragmentDefinition") {
@@ -366,7 +369,11 @@ class GQLQuery {
         if (this._inputObjectStack.has(gqlType.name)) {
             // Create a placeholder type that will be filled in later
             const placeholderType = builder.getClassType(
-                makeNames(gqlType.name, containingFieldName, containingTypeName),
+                makeNames(
+                    gqlType.name,
+                    containingFieldName,
+                    containingTypeName,
+                ),
                 new Map(),
             );
             this._createdInputTypes.set(gqlType.name, placeholderType);
@@ -607,6 +614,21 @@ class GQLQuery {
             );
         }
 
+        if (query.operation === "subscription") {
+            if (this._schema.subscriptionType === undefined) {
+                return panic("This GraphQL endpoint has no subscriptions.");
+            }
+
+            return this.makeIRTypeFromSelectionSet(
+                builder,
+                query.selectionSet,
+                this._schema.subscriptionType,
+                null,
+                queryName,
+                "data",
+            );
+        }
+
         return panic(`Unknown query operation type: "${query.operation}"`);
     }
 }
@@ -618,6 +640,8 @@ class GQLSchemaFromJSON implements GQLSchema {
     public readonly queryType: GQLType;
 
     public readonly mutationType?: GQLType;
+
+    public readonly subscriptionType?: GQLType;
 
     public constructor(json: { data: GraphQLSchema }) {
         const schema: GraphQLSchema = json.data;
@@ -650,20 +674,33 @@ class GQLSchemaFromJSON implements GQLSchema {
         // console.log(`query type ${queryType.name} is ${queryType.kind}`);
         this.queryType = queryType;
 
-        if (schema.__schema.mutationType === null) {
-            return;
+        const mutationTypeInfo = schema.__schema.mutationType;
+        if (mutationTypeInfo !== null) {
+            if (mutationTypeInfo.name === null) {
+                return panic("Mutation type doesn't have a name.");
+            }
+
+            const mutationType = this.types[mutationTypeInfo.name];
+            if (mutationType === undefined) {
+                return panic("Mutation type not found.");
+            }
+
+            this.mutationType = mutationType;
         }
 
-        if (schema.__schema.mutationType.name === null) {
-            return panic("Mutation type doesn't have a name.");
-        }
+        const subscriptionTypeInfo = schema.__schema.subscriptionType;
+        if (subscriptionTypeInfo !== null) {
+            if (subscriptionTypeInfo.name === null) {
+                return panic("Subscription type doesn't have a name.");
+            }
 
-        const mutationType = this.types[schema.__schema.mutationType.name];
-        if (mutationType === undefined) {
-            return panic("Mutation type not found.");
-        }
+            const subscriptionType = this.types[subscriptionTypeInfo.name];
+            if (subscriptionType === undefined) {
+                return panic("Subscription type not found.");
+            }
 
-        this.mutationType = mutationType;
+            this.subscriptionType = subscriptionType;
+        }
     }
 
     private readonly addTypeFields = (

@@ -18,6 +18,7 @@ import * as _ from "lodash";
 import type { Readable } from "readable-stream";
 import stringToStream from "string-to-stream";
 import _wordwrap from "wordwrap";
+import { buildSchema, graphql, getIntrospectionQuery } from "graphql";
 
 import {
     FetchingJSONSchemaStore,
@@ -105,6 +106,23 @@ export interface CLIOptions<Lang extends LanguageName = LanguageName> {
 
 const defaultDefaultTargetLanguageName = "go";
 
+async function convertSDLToIntrospectionJSON(sdlString: string): Promise<object> {
+    // Build a GraphQL schema from the SDL string
+    const schema = buildSchema(sdlString);
+    // Get the introspection result by executing the introspection query
+    const result = await graphql({
+        schema,
+        source: getIntrospectionQuery(),
+    });
+    if (result.errors) {
+        return panic(
+            `Errors during GraphQL introspection: ${JSON.stringify(result.errors)}`,
+        );
+    }
+    // Return the result as a plain object (serialize and parse to ensure it's plain)
+    return JSON.parse(JSON.stringify(result));
+}
+
 async function sourceFromFileOrUrlArray(
     name: string,
     filesOrUrls: string[],
@@ -138,7 +156,6 @@ async function samplesFromDirectory(
         const sourcesInDir: TypeSource[] = [];
         const graphQLSources: GraphQLTypeSource[] = [];
         let graphQLSchema: Readable | undefined = undefined;
-        let graphQLSchemaFileName: string | undefined = undefined;
         for (let file of files) {
             const name = typeNameFromFilename(file);
 
@@ -176,7 +193,6 @@ async function samplesFromDirectory(
                     fileOrUrl,
                     httpHeaders,
                 );
-                graphQLSchemaFileName = fileOrUrl;
             } else if (file.endsWith(".graphql")) {
                 graphQLSources.push({
                     kind: "graphql",
@@ -196,11 +212,24 @@ async function samplesFromDirectory(
                 });
             }
 
-            const schema = parseJSON(
-                await getStream(graphQLSchema),
-                "GraphQL schema",
-                graphQLSchemaFileName,
-            );
+            const schemaString = await getStream(graphQLSchema);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            let schema: any;
+
+            // Try to parse as JSON first, if that fails, treat as SDL
+            try {
+                schema = JSON.parse(schemaString);
+            } catch {
+                // Not JSON, try SDL format
+                try {
+                    schema = await convertSDLToIntrospectionJSON(schemaString);
+                } catch (error) {
+                    return panic(
+                        `Error parsing GraphQL schema (tried both JSON and SDL formats): ${exceptionToString(error)}`,
+                    );
+                }
+            }
+
             for (const source of graphQLSources) {
                 source.schema = schema;
                 sourcesInDir.push(source);
@@ -1030,11 +1059,23 @@ export async function makeQuicktypeOptions(
                     schemaString = fs.readFileSync(schemaFileName, "utf8");
                 }
 
-                const schema = parseJSON(
-                    schemaString,
-                    "GraphQL schema",
-                    schemaFileName,
-                );
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                let schema: any;
+
+                // Try to parse as JSON first, if that fails, treat as SDL
+                try {
+                    schema = JSON.parse(schemaString);
+                } catch {
+                    // Not JSON, try SDL format
+                    try {
+                        schema = await convertSDLToIntrospectionJSON(schemaString);
+                    } catch (error) {
+                        return panic(
+                            `Error parsing GraphQL schema (tried both JSON and SDL formats): ${exceptionToString(error)}`,
+                        );
+                    }
+                }
+
                 const query = await getStream(
                     await readableFromFileOrURL(queryFile, options.httpHeader),
                 );

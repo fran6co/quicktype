@@ -339,7 +339,8 @@ class GQLQuery {
         return fragment;
     };
 
-    private _inputObjectDepth = 0;
+    private readonly _inputObjectStack = new Set<string>();
+    private readonly _createdInputTypes = new Map<string, TypeRef>();
     private readonly makeIRTypeFromInputObject = (
         builder: TypeBuilder,
         gqlType: GQLType,
@@ -347,11 +348,6 @@ class GQLQuery {
         containingTypeName: string | null,
         overrideName?: string,
     ): TypeRef => {
-        if (this._inputObjectDepth > 3) {
-            // TODO: Support objects with depth > 3 and recursive references
-            return builder.getPrimitiveType("null");
-        }
-        this._inputObjectDepth++;
         if (!gqlType.name) {
             return panic("Input object type doesn't have a name.");
         }
@@ -359,6 +355,26 @@ class GQLQuery {
             return panic("Input object type doesn't have fields.");
         }
         const nameOrOverride = overrideName ?? gqlType.name;
+
+        // Check if we've already created this type
+        const existingType = this._createdInputTypes.get(gqlType.name);
+        if (existingType !== undefined) {
+            return existingType;
+        }
+
+        // Check for circular reference
+        if (this._inputObjectStack.has(gqlType.name)) {
+            // Create a placeholder type that will be filled in later
+            const placeholderType = builder.getClassType(
+                makeNames(gqlType.name, containingFieldName, containingTypeName),
+                new Map(),
+            );
+            this._createdInputTypes.set(gqlType.name, placeholderType);
+            return placeholderType;
+        }
+
+        this._inputObjectStack.add(gqlType.name);
+
         const properties = new Map<string, ClassProperty>();
         for (const field of gqlType.inputFields) {
             const fieldType = this.makeIRTypeFromFieldNode(
@@ -382,11 +398,16 @@ class GQLQuery {
                 ),
             );
         }
-        this._inputObjectDepth--;
-        return builder.getClassType(
+
+        this._inputObjectStack.delete(gqlType.name);
+
+        const classType = builder.getClassType(
             makeNames(nameOrOverride, containingFieldName, containingTypeName),
             properties,
         );
+        this._createdInputTypes.set(gqlType.name, classType);
+
+        return classType;
     };
 
     public readonly makeVariablesType = (
@@ -411,7 +432,11 @@ class GQLQuery {
             // Build the type from the unwrapped variable type
             let irType: TypeRef;
             if (variableType.kind === Kind.LIST_TYPE) {
-                const listItemType = variableType.type;
+                let listItemType = variableType.type;
+                // Handle case where list items are non-null (e.g., [ItemType!])
+                if (listItemType.kind === Kind.NON_NULL_TYPE) {
+                    listItemType = listItemType.type;
+                }
                 if (listItemType.kind !== Kind.NAMED_TYPE) {
                     return panic(
                         `Named type not found for list variable "${definition.variable.name.value}"`,

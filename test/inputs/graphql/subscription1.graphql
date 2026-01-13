@@ -1,0 +1,6 @@
+subscription HoleRoundPointChanges {
+  holeRoundPointChanges {
+    id
+    message
+  }
+}

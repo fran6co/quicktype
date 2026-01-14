@@ -21,7 +21,7 @@
         "build:pkg:linux": "npm run build && pkg dist/index.js --targets node18-linux-x64 --output dist/quicktype-linux-x64",
         "build:pkg:linux-arm64": "npm run build && pkg dist/index.js --targets node18-linux-arm64 --output dist/quicktype-linux-arm64",
         "build:pkg:win": "npm run build && pkg dist/index.js --targets node18-win-x64 --output dist/quicktype-win-x64.exe",
-        "build:pkg:all": "npm run build && pkg dist/index.js --targets node18-macos-arm64,node18-linux-x64,node18-linux-arm64,node18-win-x64 --out-path dist"
+        "build:pkg:all": "npm run build && pkg dist/index.js --targets node18-macos-arm64,node18-linux-x64,node18-linux-arm64,node18-win-x64 --output dist/quicktype"
     },
     "workspaces": [
         "./packages/quicktype-core",
@@ -78,8 +78,6 @@
             }
         }
     },
-    "files": [
-        "dist"
-    ],
+    "files": ["dist"],
     "bin": "dist/index.js"
 }

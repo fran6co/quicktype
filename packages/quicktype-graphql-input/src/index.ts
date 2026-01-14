@@ -151,6 +151,7 @@ function makeScalar(builder: TypeBuilder, ft: GQLType): TypeRef {
         case "BigInt":
         case "bigint":
             return builder.getPrimitiveType("integer");
+        case "float8":
         case "Float":
             return builder.getPrimitiveType("double");
         default:

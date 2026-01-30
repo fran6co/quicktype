@@ -144,16 +144,19 @@ function removeNull(builder: TypeBuilder, tref: TypeRef): TypeRef {
 }
 
 function makeScalar(builder: TypeBuilder, ft: GQLType): TypeRef {
-    switch (ft.name) {
-        case "Boolean":
+    const name = (ft.name ?? "").toLowerCase();
+    switch (name) {
+        case "boolean":
             return builder.getPrimitiveType("bool");
-        case "Int":
-        case "BigInt":
+        case "int":
         case "bigint":
             return builder.getPrimitiveType("integer");
         case "float8":
-        case "Float":
+        case "float":
             return builder.getPrimitiveType("double");
+        case "json":
+        case "jsonb":
+            return builder.getPrimitiveType("any");
         default:
             // FIXME: support ID specifically?
             return builder.getStringType(
